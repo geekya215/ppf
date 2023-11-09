@@ -1,79 +1,67 @@
 package io.geekya215.ppf;
 
 import io.geekya215.ppf.doc.*;
+import io.geekya215.ppf.mode.Br;
+import io.geekya215.ppf.mode.Fl;
+import io.geekya215.ppf.mode.Mode;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public final class PPF {
-    // -- flattening in-place
-    // layout :: Doc -> String
-    // layout (Nest n (Nest m x)) = layout (Nest (n + m) x)
-    // layout (Nest n (Cons x y)) = layout (Nest n x) ++ layout (Nest n y)
-    // layout (Nest n (Break s))  = "\n" ++ (replicate n ' ')
-    // layout (Nest n x)          = layout x
-    // layout Nil                 = ""
-    // layout (Break s)           = "\n"
-    // layout (Text t)            = t
-    // layout (Cons x y)          = layout x ++ layout y
-    // layout (Group d)           = layout d
-    public static String layout(Doc d) {
-        return switch (d) {
-            case Nest(int n, Doc dd) -> switch (dd) {
-                case Nest(int m, Doc x) -> layout(new Nest(n + m, x));
-                case Cons(Doc x, Doc y) -> layout(new Nest(n, x)) + layout(new Nest(n, y));
-                case Break _ -> "\n" + " ".repeat(n);
-                default -> layout(dd);
-            };
-            case Nil _ -> "";
-            case Break _ -> "\n";
-            case Text(String t) -> t;
-            case Cons(Doc x, Doc y) -> layout(x) + layout(y);
-            case Group(Doc g) -> layout(g);
+    public static boolean fits(int w, List<IDoc> ids) {
+        if (w < 0) {
+            return false;
+        }
+
+        if (ids.isEmpty()) {
+            return true;
+        }
+
+        IDoc x = ids.get(0);
+        List<IDoc> z = ids.subList(1, ids.size());
+        return switch (x) {
+            case DDoc(_, _, Nil _) -> fits(w, z);
+            case DDoc(_, _, Text(String s)) -> fits(w - s.length(), z);
+            case DDoc(_, Fl _, Break(String s)) -> fits(w - s.length(), z);
+            case DDoc(_, Br _, Break(_)) -> true;
+            case DDoc(int i, Mode m, Nest(int j, Doc a)) -> fits(w, addFirst(new DDoc(i + j, m, a), z));
+            case DDoc(int i, Mode m, Cons(Doc a, Doc b)) ->
+                    fits(w, addFirst(new DDoc(i, m, a), addFirst(new DDoc(i, m, b), z)));
+            case DDoc(int i, _, Group(Doc a)) -> fits(w, addFirst(new DDoc(i, new Fl(), a), z));
         };
     }
 
-    // type SDoc = Doc
-    //
-    // normalize :: Doc -> SDoc
-    // normalize (Nest n Nil)        = Nil
-    // normalize (Nest n (Nest m x)) = normalize (Nest (n+m) x)
-    // normalize (Nest n (Cons x y)) = normalize (Nest n x) <> normalize (Nest n y)
-    // normalize (Nest n (Text s))   = Text s
-    // normalize (Nest n (Break s))  = Nest n (Break s)
-    // normalize (Nest n (Group x))  = normalize (Nest n x)
-    // normalize (Cons x y)          = normalize x <> normalize y
-    // normalize (Group x)           = normalize x
-    // normalize d                   = d
-    public static Doc normalize(Doc d) {
-        return switch (d) {
-            case Nest(int n, Doc dd) -> switch (dd) {
-                case Nil _ -> new Nil();
-                case Nest(int m, Doc x) -> normalize(new Nest(n + m, x));
-                case Cons(Doc x, Doc y) -> concat(normalize(new Nest(n, x)), normalize(new Nest(n, y)));
-                case Text(String s) -> new Text(s);
-                case Break(String s) -> new Nest(n, new Break(s));
-                case Group(Doc x) -> normalize(new Nest(n, x));
-            };
-            case Cons(Doc x, Doc y) -> concat(normalize(x), normalize(y));
-            case Group(Doc x) -> normalize(x);
-            default -> d;
+    public static String format(int w, int k, List<IDoc> ids) {
+        if (ids.isEmpty()) {
+            return "";
+        }
+
+        IDoc x = ids.get(0);
+        List<IDoc> z = ids.subList(1, ids.size());
+        return switch (x) {
+            case DDoc(_, _, Nil _) -> format(w, k, z);
+            case DDoc(_, _, Text(String s)) -> s + format(w, k + s.length(), z);
+            case DDoc(_, Fl _, Break(String s)) -> s + format(w, k + s.length(), z);
+            case DDoc(int i, Br _, Break(_)) -> "\n" + " ".repeat(i) + format(w, i, z);
+            case DDoc(int i, Mode m, Nest(int j, Doc a)) -> format(w, k, addFirst(new DDoc(i + j, m, a), z));
+            case DDoc(int i, Mode m, Cons(Doc a, Doc b)) ->
+                    format(w, k, addFirst(new DDoc(i, m, a), addFirst(new DDoc(i, m, b), z)));
+            case DDoc(int i, _, Group(Doc a)) -> format(w, k,
+                    addFirst(new DDoc(i, fits(w - k, addFirst(new DDoc(i, new Fl(), a), z)) ? new Fl() : new Br(), a), z));
         };
     }
 
-    // layoutSDoc :: SDoc -> String
-    // layoutSDoc Nil                = ""
-    // layoutSDoc (Nest n (Break s)) = "\n" ++ replicate n ' '
-    // layoutSDoc (Text s)           = s
-    // layoutSDoc (Cons x y)         = layoutSDoc x ++ layoutSDoc y
-    // layoutSDoc (Break s)          = "\n"
-    // layoutSDoc d                  = undefined
-    public static String layoutDoc(Doc d) {
-        return switch (d) {
-            case Nil _ -> "";
-            case Nest(int n, Break _) -> "\n" + " ".repeat(n);
-            case Text(String s) -> s;
-            case Cons(Doc x, Doc y) -> layoutDoc(x) + layoutDoc(y);
-            case Break _ -> "\n";
-            default -> throw new RuntimeException("Unknown doc");
-        };
+    public static String pretty(int w, Doc d) {
+        return format(w, 0, new ArrayList<>() {{
+            add(new DDoc(0, new Fl(), d));
+        }});
+    }
+
+    public static <T> List<T> addFirst(T x, List<T> xs) {
+        ArrayList<T> xxs = new ArrayList<>(xs);
+        xxs.addFirst(x);
+        return xxs;
     }
 
     public static Doc concat(Doc l, Doc r) {
